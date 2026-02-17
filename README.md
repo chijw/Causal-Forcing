@@ -125,7 +125,9 @@ python utils/merge_and_get_clean.py
 ```
 > If the download gets stuck, Ctrl^C and then resume it.
 
+
 > For training on your own dataset, refer to [this issue](https://github.com/thu-ml/Causal-Forcing/issues/8).
+
 
 Then train the AR-diffusion model:
 - Framewise:
