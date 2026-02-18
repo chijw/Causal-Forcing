@@ -39,7 +39,7 @@ https://github.com/user-attachments/assets/310f0cfa-e1bb-496d-8941-87f77b3271c0
 
 
 ## 🔥 News
-- **2026.2.11** : We now support **I2V** generation! Feel free ro try it [here](#new-i2v)!
+- **2026.2.11** : We now support **I2V** generation! Feel free to try it [here](#new-i2v)!
 - **2026.2.9** : [Infinity-RoPE](https://github.com/yesiltepe-hidir/infinity-rope) adopts Causal Forcing as one of the base models!
 - **2026.2.8** : [Deep Forcing](https://cvlab-kaist.github.io/DeepForcing/) adopts Causal Forcing as one of the base models!
 - **2026.2.7** : Causal Forcing now supports [Rolling Forcing](https://github.com/TencentARC/RollingForcing), enabling minute-level long video generation!
