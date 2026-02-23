@@ -16,9 +16,7 @@ class ODERegression(BaseModel):
         See Sec 4.3 of CausVid https://arxiv.org/abs/2412.07772 for details
         """
         super().__init__(args, device)
-
         # Step 1: Initialize all models
-
         self.generator = WanDiffusionWrapper(**getattr(args, "model_kwargs", {}), is_causal=True)
         self.generator.model.requires_grad_(True)
         if getattr(args, "generator_ckpt", False):
@@ -42,8 +40,9 @@ class ODERegression(BaseModel):
 
         # Step 2: Initialize all hyperparameters
         self.timestep_shift = getattr(args, "timestep_shift", 1.0)
+        
 
-    def _initialize_models(self, args):
+    def _initialize_models(self, args, device):
         self.generator = WanDiffusionWrapper(**getattr(args, "model_kwargs", {}), is_causal=True)
         self.generator.model.requires_grad_(True)
 
@@ -52,9 +51,12 @@ class ODERegression(BaseModel):
 
         self.vae = WanVAEWrapper()
         self.vae.requires_grad_(False)
+        
+        self.scheduler = self.generator.get_scheduler()
+        self.scheduler.timesteps = self.scheduler.timesteps.to(device)
 
     @torch.no_grad()
-    def _prepare_generator_input(self, ode_latent: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    def _prepare_generator_input(self, ode_latent: torch.Tensor, tf=False, causal = True) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Given a tensor containing the whole ODE sampling trajectories,
         randomly choose an intermediate timestep and return the latent as well as the corresponding timestep.
@@ -67,14 +69,16 @@ class ODERegression(BaseModel):
         batch_size, num_denoising_steps, num_frames, num_channels, height, width = ode_latent.shape
 
         # Step 1: Randomly choose a timestep for each frame
+        uniform_timestep = True
         index = self._get_timestep(
             0,
             len(self.denoising_step_list),
             batch_size,
             num_frames,
             self.num_frame_per_block,
-            uniform_timestep=False
+            uniform_timestep=uniform_timestep
         )
+
         if self.args.i2v:
             index[:, 0] = len(self.denoising_step_list) - 1
 
@@ -85,17 +89,6 @@ class ODERegression(BaseModel):
         ).squeeze(1)
 
         timestep = self.denoising_step_list[index].to(self.device)
-
-        # if self.extra_noise_step > 0:
-        #     random_timestep = torch.randint(0, self.extra_noise_step, [
-        #                                     batch_size, num_frames], device=self.device, dtype=torch.long)
-        #     perturbed_noisy_input = self.scheduler.add_noise(
-        #         noisy_input.flatten(0, 1),
-        #         torch.randn_like(noisy_input.flatten(0, 1)),
-        #         random_timestep.flatten(0, 1)
-        #     ).detach().unflatten(0, (batch_size, num_frames)).type_as(noisy_input)
-
-        #     noisy_input[timestep == 0] = perturbed_noisy_input[timestep == 0]
 
         return noisy_input, timestep
 
@@ -111,15 +104,20 @@ class ODERegression(BaseModel):
             - log_dict: a dictionary containing additional information for loss timestep breakdown.
         """
         # Step 1: Run generator on noisy latents
-        target_latent = ode_latent[:, -1]
-
+        clean_latent = ode_latent[:, -1]
+        target_latent = ode_latent[:, -2]
+        ode_latent_valid = ode_latent[:, :-1]
+        
+            
         noisy_input, timestep = self._prepare_generator_input(
-            ode_latent=ode_latent)
-
+            ode_latent=ode_latent_valid, tf=True, causal = True)
+        
+        
         _, pred_image_or_video = self.generator(
             noisy_image_or_video=noisy_input,
             conditional_dict=conditional_dict,
-            timestep=timestep
+            timestep=timestep,
+            clean_x = clean_latent
         )
 
         # Step 2: Compute the regression loss
