@@ -39,6 +39,7 @@ https://github.com/user-attachments/assets/310f0cfa-e1bb-496d-8941-87f77b3271c0
 
 
 ## 🔥 News
+- **2026.2.28** : Add [FAQ section](#faq--blog) regarding hot topics, specifically which is the better Initialization between AR diffusion and causal ODE distillation.
 - **2026.2.11** : We now support **I2V** generation! Feel free to try it [here](#new-i2v)!
 - **2026.2.9** : [Infinity-RoPE](https://github.com/yesiltepe-hidir/infinity-rope) adopts Causal Forcing as one of the base models!
 - **2026.2.8** : [Deep Forcing](https://cvlab-kaist.github.io/DeepForcing/) adopts Causal Forcing as one of the base models!
@@ -306,7 +307,7 @@ Such models are the final models used to generate videos.
 - Q: Then why must the ODE (or Consistency Distillation) stage use an AR teacher?
 - A: Because ODE/CD requires the student and teacher to follow the same trajectory, so their structures must be matched; an AR student cannot be trajectory-aligned with a bidirectional teacher.
 
-**2. ODE initialization or multi-step AR diffusion initialization ?**
+**2. 🔥🔥 ODE initialization or multi-step AR diffusion initialization ?**
 - Q: Which is better as initialization: a “proper” ODE initialization or directly using multi-step AR diffusion?
 - A: We compared this in the Appendix C2. Overall, proper ODE init is better: multi-step AR diffusion init + DMD occasionally yields grid-like or waxy/greasy results. A key reason is that DMD is inherently few-step, so the right comparison is under few-step; in that regime, a few-step diffusion teacher is much weaker than an ODE-distilled teacher. Without ODE distillation, DMD must both close the step gap and handle an added conditioning gap from self-rollout: early few-step errors corrupt the history and get amplified across frames (large exposure bias), which increases DMD pressure. It can still converge, but typically with worse quality than ODE initialization. Also, with ODE init, DMD can be trained very few steps (e.g., ~100), reducing the risk of dynamics degradation from long DMD training.
 
