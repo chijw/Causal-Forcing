@@ -226,8 +226,6 @@ class Trainer:
                 unconditional_dict = self.unconditional_dict
 
         # Step 3: Train the generator
-        if self.delta_mean is not None:
-            clean_latent += self.delta_mean.to(device=clean_latent.device, dtype=clean_latent.dtype)
         generator_loss, log_dict = self.model.generator_loss(
             image_or_video_shape=image_or_video_shape,
             conditional_dict=conditional_dict,
@@ -259,71 +257,6 @@ class Trainer:
                 logging.info("DistGarbageCollector: Running GC.")
             gc.collect()
 
-    # =========================
-    # Parallel "eval": mean tensor of (pred_latent - clean_latent) on predicted segment
-    # pred has num_output_frames frames, and pred[:num_init_frames] == initial_latent (guaranteed)
-    # =========================
-    @torch.no_grad()
-    def _generate_latents(self, prompts, *, initial_latent=None, num_output_frames=21, num_init_frames=3):
-        bsz = len(prompts)
-        device = torch.device("cuda", torch.cuda.current_device())
-        noise_T = num_output_frames if initial_latent is None else (num_output_frames - num_init_frames)
-        noise = torch.randn([bsz, noise_T, 16, 60, 104], device=device, dtype=self.dtype)
-
-        latents = self.pipeline.inference(
-            noise=noise,
-            text_prompts=prompts,
-            return_latents=True,
-            initial_latent=initial_latent,
-            return_video=False
-        )
-        return latents  # expected: [B, num_output_frames, 16, 60, 104]
-
-
-    @torch.no_grad()
-    def parallel_latent_algebraic_mean(self, index, *, num_output_frames=21, num_init_frames=3):
-        rank = dist.get_rank()
-        world = dist.get_world_size()
-        device = torch.device("cuda", torch.cuda.current_device())
-
-        diff_sum = torch.zeros((num_output_frames, 16, 60, 104), device=device, dtype=torch.float32)
-        cnt = torch.zeros((), device=device, dtype=torch.float32)
-
-        prompt_index = int(index) * world + rank
-        if prompt_index < len(self.dataset):
-            sample = self.dataset[prompt_index]
-            prompt = sample["prompts"]
-            if isinstance(prompt, (list, tuple)):
-                prompt = prompt[0]
-            
-            clean = sample["clean_latent"].to(device=device, dtype=self.dtype)  # [>=21,16,60,104]
-            clean = clean[:num_output_frames]
-            print(f'clean.shape is {clean.shape}')
-            init_latent = None
-            
-            if self.given_first_chunk:
-                init_latent = clean[:num_init_frames].unsqueeze(0)
-
-            latents = self._generate_latents(
-                [prompt],
-                initial_latent=init_latent,
-                num_output_frames=num_output_frames,
-                num_init_frames=num_init_frames
-            )
-            pred = latents[0].to(torch.float32)[:num_output_frames]             # [21,16,60,104]
-            ref  = clean.to(torch.float32)                                      # [21,16,60,104]
-
-            diff_sum.copy_(pred - ref)
-            cnt.fill_(1.0)
-
-            if hasattr(self.model, "vae") and hasattr(self.model.vae, "model") and hasattr(self.model.vae.model, "clear_cache"):
-                self.model.vae.model.clear_cache()
-
-        dist.all_reduce(diff_sum, op=dist.ReduceOp.SUM)
-        dist.all_reduce(cnt, op=dist.ReduceOp.SUM)
-        return diff_sum / (cnt + 1e-12)
-
-
 
     def train(self):
 
@@ -335,60 +268,6 @@ class Trainer:
                 torch.cuda.empty_cache()
                 self.save()
                 torch.cuda.empty_cache()
-
-            # ---- parallel eval (chunk_size=1) ----
-            if self.eval_interval and (self.step % self.eval_interval == 0):
-                # all ranks must execute this block
-                was_train_gen = self.model.generator.training
-                was_train_txt = self.model.text_encoder.training
-                self.model.generator.eval()
-                self.model.text_encoder.eval()
-
-                world = dist.get_world_size()
-                # num_global = ceil(len(dataset)/world)
-                num_global = (len(self.dataset) + world - 1) // world
-
-                if num_global > 0:
-                    for i in range(self.rtf_single_gpu_batch):
-                        if dist.get_rank() == 0:
-                            idx_t = torch.randint(0, num_global, (1,), device=torch.device("cuda", torch.cuda.current_device()), dtype=torch.long)
-                        else:
-                            idx_t = torch.zeros((1,), device=torch.device("cuda", torch.cuda.current_device()), dtype=torch.long)
-                        dist.broadcast(idx_t, src=0)
-                        index = int(idx_t.item())
-                        
-                        if i == 0:
-                            diff_mean = self.parallel_latent_algebraic_mean(
-                                index=index,
-                                num_output_frames=self.eval_frames,
-                                num_init_frames=self.eval_init
-                            )
-                        else :
-                            diff_mean += self.parallel_latent_algebraic_mean(
-                                index=index,
-                                num_output_frames=self.eval_frames,
-                                num_init_frames=self.eval_init
-                            )
-                            
-                        diff_mean = diff_mean/self.rtf_single_gpu_batch
-                        
-                    if self.delta_mean is not None:
-                        self.delta_mean = self.rtf_ema_ratio * self.delta_mean + (1 - self.rtf_ema_ratio) * diff_mean
-                    else:
-                        self.delta_mean = diff_mean
-
-                        
-                    val = self.delta_mean.mean().item()
-
-                    if self.is_main_process and (not self.disable_wandb):
-                        wandb.log({"delta_mean": val}, step=self.step)
-
-
-                if was_train_gen:
-                    self.model.generator.train()
-                if was_train_txt:
-                    self.model.text_encoder.train()
-
 
             barrier()
             if self.is_main_process:
