@@ -28,7 +28,7 @@
 -----
 
 
-Causal Forcing significantly outperforms Self Forcing in **both visual quality and motion dynamics**, while keeping **the same training budget and inference efficiency**—enabling real-time, streaming video generation on a single RTX 4090. We support both chunk-wise and frame-wise models, with the latter natively unifying T2V and I2V.
+Causal Forcing significantly outperforms Self Forcing in **both visual quality and motion dynamics**, while keeping **the same training budget and inference efficiency**—enabling real-time, streaming video generation on a single RTX 4090. We support both chunk-wise and **frame-wise** models, with the latter natively unifying T2V and **I2V**.
 
 
 -----
